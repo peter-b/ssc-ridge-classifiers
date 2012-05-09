@@ -1,0 +1,16 @@
+*~
+*.o
+.deps
+Makefile
+Makefile.in
+aclocal.m4
+autom4te.cache
+build-tools
+config.h
+config.h.in
+config.log
+config.status
+configure
+m4
+ridge-classarea
+stamp-h1
