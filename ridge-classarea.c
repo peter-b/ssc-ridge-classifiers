@@ -33,20 +33,32 @@
 #include <ridgeutil.h>
 #include <ridgeio.h>
 
-#define GETOPT_OPTIONS "abph"
+#define GETOPT_OPTIONS "m:t:s:p:h"
 
 enum {
   MODE_AREA,
   MODE_AREA_LENGTH,
 };
 
-static double PRIOR_C = 0.12;
-static double PARAM_RHO = 0.1212;
-static double PARAM_THETA = 0.667;
-static double PARAM_LAMBDA_X = 1.617;
-static double PARAM_LAMBDA_Y = 1.0;
-static double PARAM_K = 4;
-static double PARAM_M = 3.1;
+static double DEFAULT_THRESHOLD = 0.12;
+static double DEFAULT_PARAM_LAMBDA_X = 1.0;
+static double DEFAULT_PARAM_LAMBDA_Y = 1.0;
+static double DEFAULT_PARAM_K = 4;
+static double DEFAULT_PARAM_M = 5;
+
+typedef struct _SubprocessData SubprocessData;
+
+struct _SubprocessData {
+  RioData *lines;
+  gchar *classification;
+
+  int mode;
+  double threshold;
+  double param_lambda_x;
+  double param_lambda_y;
+  double param_k;
+  double param_m;
+};
 
 void
 usage (const char *name, int status)
@@ -56,37 +68,22 @@ usage (const char *name, int status)
 "\n"
 "Classify ridge lines using internal area geometry.\n"
 "\n"
-"  -a              Use area-based building model\n"
-"  -b              Use area- and length-based building model\n"
-"  -p VALUE        Specify a prior building probability\n"
+"  -m MODE         Classification mode (A or AL) [default A]\n"
+"  -t THRESHOLD    Model likelihood threshold [default 0.005]\n"
+"  -s X:Y          Scale factors in ground range/azimuth [default 1]\n"
+"  -p K:M          Building Gamma model parameters [default 4,5]\n"
 "  -h              Display this message and exit\n"
 "\n"
 "Reads ridge line data generated using 'ridgetool' from IN_FILE, and\n"
-"classifies it using a maximum a posteriori Bayesian model comparison\n"
-"based on analytical models derived from stereotypical scene\n"
-"geometry.  Classification results are written to OUT_FILE, if\n"
-"specified; otherwise, IN_FILE is updated.\n"
+"classifies it using a likelihood threshold classification based on\n"
+"analytical models derived from stereotypical scene geometry.\n"
+"Classification results are written to OUT_FILE, if specified;\n"
+"otherwise, IN_FILE is updated.\n"
 "\n"
 "Please report bugs to %s.\n",
 name, PACKAGE_BUGREPORT);
   exit (status);
 }
-
-typedef struct _SubprocessData SubprocessData;
-
-struct _SubprocessData {
-  RioData *lines;
-  gchar *classification;
-
-  int mode;
-  double prior_C;
-  double param_rho;
-  double param_theta;
-  double param_lambda_x;
-  double param_lambda_y;
-  double param_k;
-  double param_m;
-};
 
 /* Calculate total length of line */
 static double
@@ -175,22 +172,9 @@ stat_line_gyration (RioLine *l)
   return Rg2 / (M * Re * Re);
 }
 
-/* Calculate prior probability of noise-induced feature */
-static double
-prior_noise (RioLine *l, double rho)
-{
-  int M = rio_line_get_length (l);
-  double p;
-
-  /* Geometric distribution on number of steps in line */
-  p = rho * pow ((1 - rho), M-1);
-
-  return p;
-}
-
 /* Calculate prior probability of building using area only */
 static double
-prior_building_area (RioLine *l, double theta,
+prior_building_area (RioLine *l,
                      double lambda_x, double lambda_y,
                      double k, double m)
 {
@@ -199,7 +183,7 @@ prior_building_area (RioLine *l, double theta,
 
   /* Estimate of projected area */
   double t = Re * sqrt (3 * Rg2);
-  double Ct = sin (theta) * lambda_x * lambda_y;
+  double Ct = lambda_x * lambda_y;
   double tmp = t / Ct / (m*m);
   double p;
 
@@ -213,7 +197,7 @@ prior_building_area (RioLine *l, double theta,
 }
 
 static double
-prior_building_area_length (RioLine *l, double theta, double lambda_x,
+prior_building_area_length (RioLine *l, double lambda_x,
                             double lambda_y, double k, double m)
 {
   double Re = stat_line_end_to_end (l);
@@ -222,7 +206,7 @@ prior_building_area_length (RioLine *l, double theta, double lambda_x,
 
   /* Estimate of projected area */
   double t = Re * sqrt (3 * Rg2);
-  double Ct = sin(theta) * lambda_x * lambda_y;
+  double Ct = lambda_x * lambda_y;
   double tmp = L*L - 4*t;
 
   /* Iverson bracket */
@@ -241,19 +225,17 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
   gchar *classification = data->classification;
   int N = rio_data_get_num_entries (lines);
 
-  double threshold = log (data->prior_C / (1.0 - data->prior_C));
+  double threshold = data->threshold;
 
   for (int i = threadnum * (N / threadcount);
        i < (threadnum + 1) * (N / threadcount);
        i++) {
 
-    double p0, p1;
+    double p1;
     RioLine *l = rio_data_get_line (lines, i);
-    p0 = prior_noise (l, data->param_rho);
     switch (data->mode) {
     case MODE_AREA:
       p1 = prior_building_area (l,
-                                data->param_theta,
                                 data->param_lambda_x,
                                 data->param_lambda_y,
                                 data->param_k,
@@ -261,7 +243,6 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
       break;
     case MODE_AREA_LENGTH:
       p1 = prior_building_area_length (l,
-                                       data->param_theta,
                                        data->param_lambda_x,
                                        data->param_lambda_y,
                                        data->param_k,
@@ -272,22 +253,65 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
     }
 
     /* Classify */
-    classification[i] = (threshold + log (p1 / p0) > 0);
+    classification[i] = p1 > threshold;
   }
 }
 
 int
 main (int argc, char **argv)
 {
-  int c, N;
+  int c, N, status;
   const char *infilename = NULL;
   const char *outfilename = NULL;
   RioData *lines = NULL;
   gchar *classification = NULL;
   SubprocessData data;
+  data.mode = MODE_AREA;
+  data.threshold = DEFAULT_THRESHOLD;
+  data.param_k = DEFAULT_PARAM_K;
+  data.param_m = DEFAULT_PARAM_M;
+  data.param_lambda_x = DEFAULT_PARAM_LAMBDA_X;
+  data.param_lambda_y = DEFAULT_PARAM_LAMBDA_Y;
 
   while ((c = getopt (argc, argv, GETOPT_OPTIONS)) != -1) {
     switch (c) {
+    case 'm':
+      if (strcmp(optarg, "A") == 0) {
+        data.mode = MODE_AREA;
+      } else if (strcmp(optarg, "AL") == 0) {
+        data.mode = MODE_AREA_LENGTH;
+      } else {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -m option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
+    case 't':
+      status = sscanf (optarg, "%lf", &data.threshold);
+      if (status != 1) {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -t option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
+    case 's':
+      status = sscanf (optarg, "%lf:%lf",
+                       &data.param_lambda_x, &data.param_lambda_y);
+      if (status != 2) {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -s option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
+    case 'p':
+      status = sscanf (optarg, "%lf:%lf",
+                       &data.param_k, &data.param_m);
+      if (status != 2) {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -p option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
     case 'h':
       usage (argv[0], 0);
       break;
@@ -304,6 +328,14 @@ main (int argc, char **argv)
     default:
       g_assert_not_reached ();
     }
+  }
+
+  /* Warn if input doesn't make sense */
+  if (data.mode == MODE_AREA_LENGTH
+      && data.param_lambda_x != data.param_lambda_y) {
+    fprintf (stderr,
+"WARNING: In AL (area/length) mode, results may be unreliable without\n"
+"equal ground range and azimuth scale factors.\n\n");
   }
 
   /* Get input filename */
@@ -343,14 +375,6 @@ main (int argc, char **argv)
 
   data.classification = classification;
   data.lines = lines;
-  data.mode = MODE_AREA;
-  data.prior_C = PRIOR_C;
-  data.param_rho = PARAM_RHO;
-  data.param_theta = PARAM_THETA;
-  data.param_lambda_x = PARAM_LAMBDA_X;
-  data.param_lambda_y = PARAM_LAMBDA_Y;
-  data.param_k = PARAM_K;
-  data.param_m = PARAM_M;
 
   if (!rut_multiproc_task (subprocess_func, &data)) {
     fprintf (stderr, "ERROR: Line data processing failed.\n");
