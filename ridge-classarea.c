@@ -33,7 +33,7 @@
 #include <ridgeutil.h>
 #include <ridgeio.h>
 
-#define GETOPT_OPTIONS "m:t:s:p:h"
+#define GETOPT_OPTIONS "m:t:s:p:j:h"
 
 enum {
   MODE_AREA,
@@ -51,6 +51,7 @@ typedef struct _SubprocessData SubprocessData;
 struct _SubprocessData {
   RioData *lines;
   gchar *classification;
+  float *likelihood;
 
   int mode;
   double threshold;
@@ -72,6 +73,7 @@ usage (const char *name, int status)
 "  -t THRESHOLD    Model likelihood threshold [default 0.005]\n"
 "  -s X:Y          Scale factors in ground range/azimuth [default 1]\n"
 "  -p K:M          Building Gamma model parameters [default 4,5]\n"
+"  -j THREADS      Number of multiprocessing threads to use [default 1]\n"
 "  -h              Display this message and exit\n"
 "\n"
 "Reads ridge line data generated using 'ridgetool' from IN_FILE, and\n"
@@ -223,6 +225,7 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
   SubprocessData *data = (SubprocessData *) user_data;
   RioData *lines = data->lines;
   gchar *classification = data->classification;
+  float *likelihood = data->likelihood;
   int N = rio_data_get_num_entries (lines);
 
   double threshold = data->threshold;
@@ -254,6 +257,7 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
 
     /* Classify */
     classification[i] = p1 > threshold;
+    likelihood[i] = rio_htonf (p1);
   }
 }
 
@@ -264,7 +268,6 @@ main (int argc, char **argv)
   const char *infilename = NULL;
   const char *outfilename = NULL;
   RioData *lines = NULL;
-  gchar *classification = NULL;
   SubprocessData data;
   data.mode = MODE_AREA;
   data.threshold = DEFAULT_THRESHOLD;
@@ -308,6 +311,14 @@ main (int argc, char **argv)
                        &data.param_k, &data.param_m);
       if (status != 2) {
         fprintf (stderr, "ERROR: Bad argument '%s' to -p option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
+    case 'j':
+      status = sscanf (optarg, "%i", &rut_multiproc_threads);
+      if (status != 1) {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -j option.\n\n",
                  optarg);
         usage (argv[0], 1);
       }
@@ -366,16 +377,13 @@ main (int argc, char **argv)
   }
   N = rio_data_get_num_entries (lines);
 
-  /* Create classification array. This is allocated using a RutSurface
-   * so that it can be modified by subprocesses. */
-  classification = rut_multiproc_malloc (N * sizeof (gchar));
-
-  /* Carry out multiprocess classification */
-  rut_multiproc_threads = 1; /* FIXME */
-
-  data.classification = classification;
+  /* Create classification arrays. These are allocated using RutSurfaces
+   * so that they can be modified by subprocesses. */
+  data.classification = rut_multiproc_malloc (N * sizeof (gchar));
+  data.likelihood = rut_multiproc_malloc (N * sizeof (float));
   data.lines = lines;
 
+  /* Carry out multiprocess classification */
   if (!rut_multiproc_task (subprocess_func, &data)) {
     fprintf (stderr, "ERROR: Line data processing failed.\n");
     exit (3);
@@ -383,7 +391,9 @@ main (int argc, char **argv)
 
   /* Save data */
   rio_data_set_metadata (lines, RIO_KEY_IMAGE_CLASSIFICATION,
-                         classification, N * sizeof (gchar));
+                         data.classification, N * sizeof (gchar));
+  rio_data_set_metadata (lines, RIO_KEY_IMAGE_CLASS_LIKELIHOOD,
+                         (char *) data.likelihood, N * sizeof (float));
   if (!rio_data_to_file (lines, outfilename)) {
     fprintf (stderr, "ERROR: Could not write ridge data to '%s': %s.\n",
              outfilename, strerror (errno));
@@ -391,6 +401,7 @@ main (int argc, char **argv)
   }
 
   rio_data_destroy (lines);
-  rut_multiproc_free (classification);
+  rut_multiproc_free (data.classification);
+  rut_multiproc_free (data.likelihood);
   return 0;
 }
