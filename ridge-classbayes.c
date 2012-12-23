@@ -33,12 +33,37 @@
 
 #define GETOPT_OPTIONS "h"
 
-typedef struct _RidgeModel RidgeModel;
+enum _ModelType {
+  MODEL_TYPE_GA0,
+  MODEL_TYPE_FA,
+  MODEL_TYPE_LOGN,
+};
 
-struct _RidgeModel {
-  double weight;
-  double s_sigma, s_mu;
-  double b_l, b_m, b_mu;
+typedef enum _ModelType ModelType;
+
+typedef struct _Model Model;
+typedef struct _RidgeClass RidgeClass;
+
+struct _Model {
+  ModelType type;
+  union {
+    struct {
+      double alpha, gamma, n;
+    } ga0;
+    struct {
+      double L, M, mu;
+    } fa;
+    struct {
+      double sigma, mu;
+    } logn;
+  } params;
+};
+
+
+struct _RidgeClass {
+  double log_weight;
+  Model brightness;
+  Model strength;
 };
 
 static void
@@ -55,18 +80,14 @@ usage (char *name, int status)
 "parameters in FITFILE. If OUTFILE is not specified, results are\n"
 "written back to INFILE.\n"
 "\n"
-"If INFILE already contains classification data, the existing\n"
-"classification is treated as a reference classification, and\n"
-"misclassification statistics are generated on standard output.\n"
-"In this case, a new classification is never written to INFILE.\n"
-"\n"
 "Please report bugs to %s.\n",
 name, PACKAGE_BUGREPORT);
   exit (status);
 }
 
 static double
-key_file_get_double (GKeyFile *key_file, char *group_name, char *key)
+key_file_get_double (GKeyFile *key_file, const char *group_name,
+                     const char *key)
 {
   GError *err = NULL;
   double result = g_key_file_get_double (key_file, group_name, key, &err);
@@ -75,6 +96,89 @@ key_file_get_double (GKeyFile *key_file, char *group_name, char *key)
     exit (4);
   }
   return result;
+}
+
+static double
+key_file_get_double_prefix (GKeyFile *key_file, const char *group_name,
+                            const char *prefix, const char *suffix)
+{
+  gchar *key = g_strdup_printf ("%s.%s", prefix, suffix);
+  double result = key_file_get_double (key_file, group_name, key);
+  g_free (key);
+  return result;
+}
+
+static Model
+key_file_get_model (GKeyFile *key_file, const gchar *group_name,
+                    const gchar *prefix)
+{
+  Model m;
+  /* Figure out what type of model this is */
+  gchar *key;
+  gchar *type;
+  key = g_strdup_printf ("%s.type", prefix);
+  type = g_key_file_get_string (key_file, group_name, key, NULL);
+  if (type == NULL || strcmp (type, "FA") == 0) {
+    m.type = MODEL_TYPE_FA;
+  } else if (strcmp (type, "GA0") == 0) {
+    m.type = MODEL_TYPE_GA0;
+  } else if (strcmp (type, "LogN") == 0) {
+    m.type = MODEL_TYPE_LOGN;
+  } else {
+    fprintf (stderr, "ERROR: Invalid model type: %s\n", type);
+    exit (4);
+  }
+  g_free (type);
+  g_free (key);
+
+  /* Now read params accordingly */
+  switch (m.type) {
+  case MODEL_TYPE_FA:
+    m.params.fa.L = key_file_get_double_prefix (key_file, group_name, prefix, "L");
+    m.params.fa.M = key_file_get_double_prefix (key_file, group_name, prefix, "M");
+    m.params.fa.mu = key_file_get_double_prefix (key_file, group_name, prefix, "mu");
+    break;
+  case MODEL_TYPE_GA0:
+    m.params.ga0.alpha = key_file_get_double_prefix (key_file, group_name, prefix, "alpha");
+    m.params.ga0.gamma = key_file_get_double_prefix (key_file, group_name, prefix, "gamma");
+    m.params.ga0.n = key_file_get_double_prefix (key_file, group_name, prefix, "n");
+    break;
+  case MODEL_TYPE_LOGN:
+    m.params.logn.sigma = key_file_get_double_prefix (key_file, group_name, prefix, "sigma");
+    m.params.logn.mu = key_file_get_double_prefix (key_file, group_name, prefix, "mu");
+    break;
+  default:
+    g_assert_not_reached ();
+  }
+
+  return m;
+}
+
+static RidgeClass
+key_file_get_class (GKeyFile *key_file, const gchar *group_name)
+{
+  RidgeClass c;
+  c.log_weight = log (key_file_get_double (key_file, group_name, "weight"));
+  c.brightness = key_file_get_model (key_file, group_name, "brightness");
+  c.strength = key_file_get_model (key_file, group_name, "strength");
+  return c;
+}
+
+static RidgeClass *
+key_file_get_classes (GKeyFile *key_file, gsize *num_classes)
+{
+  gsize N;
+  RidgeClass *classes;
+  gchar **groups = g_key_file_get_groups (key_file, &N);
+  classes = g_new0 (RidgeClass, N);
+
+  for (int i = 0; i < N; ++i) {
+    classes[i] = key_file_get_class (key_file, groups[i]);
+  }
+
+  g_assert (num_classes);
+  *num_classes = N;
+  return classes;
 }
 
 static double
@@ -90,32 +194,61 @@ fisherpdf (float x, double L, double M, double mu)
 }
 
 static double
-log_likelihood (RidgeModel m, RioPoint *p)
+ga0pdf (float x, double alpha, double gamma, double n)
 {
-  return (log (lognormpdf (p->strength, m.s_mu, m.s_sigma))
-          + log (fisherpdf (p->brightness, m.b_l, m.b_m, m.b_mu)));
+  return fisherpdf (x, n, -alpha, sqrt (-gamma / alpha));
 }
 
 static double
-point_log_likelihood (RidgeModel m, RioPoint *p)
+model_pdf (Model m, double x)
 {
-  return m.weight + log_likelihood (m, p);
+  switch (m.type) {
+  case MODEL_TYPE_GA0:
+    return ga0pdf (x,
+                   m.params.ga0.alpha,
+                   m.params.ga0.gamma,
+                   m.params.ga0.n);
+  case MODEL_TYPE_FA:
+    return fisherpdf (x,
+                      m.params.fa.L,
+                      m.params.fa.M,
+                      m.params.fa.mu);
+  case MODEL_TYPE_LOGN:
+    return lognormpdf (x,
+                       m.params.logn.mu,
+                       m.params.logn.sigma);
+  default:
+    g_assert_not_reached ();
+  }
 }
 
 static double
-segment_log_likelihood (RidgeModel m, RioSegment *s)
+ridge_class_log_likelihood (RidgeClass c, RioPoint *p)
 {
-  return (m.weight
-          + log_likelihood (m, rio_segment_get_start (s))
-          + log_likelihood (m, rio_segment_get_end (s)));
+  return (log (model_pdf (c.strength, p->strength))
+          + log (model_pdf (c.brightness, p->brightness)));
 }
 
 static double
-line_log_likelihood (RidgeModel m, RioLine *l)
+ridge_class_point_log_likelihood (RidgeClass c, RioPoint *p)
 {
-  double sum = m.weight;
+  return c.log_weight + ridge_class_log_likelihood (c, p);
+}
+
+static double
+ridge_class_segment_log_likelihood (RidgeClass c, RioSegment *s)
+{
+  return (c.log_weight
+          + ridge_class_log_likelihood (c, rio_segment_get_start (s))
+          + ridge_class_log_likelihood (c, rio_segment_get_end (s)));
+}
+
+static double
+ridge_class_line_log_likelihood (RidgeClass c, RioLine *l)
+{
+  double sum = c.log_weight;
   for (int i = 0; i < rio_line_get_length (l); i++) {
-    sum += log_likelihood (m, rio_line_get_point (l, i));
+    sum += ridge_class_log_likelihood (c, rio_line_get_point (l, i));
   }
   return sum;
 }
@@ -123,17 +256,17 @@ line_log_likelihood (RidgeModel m, RioLine *l)
 int
 main (int argc, char **argv)
 {
-  int c;
+  int c, N;
   char *fitfile = NULL;
   char *infile = NULL;
   char *outfile = NULL;
-  uint8_t *reference = NULL;
   uint8_t *classification = NULL;
-  size_t classification_size = 0;
+  float *likelihood = NULL;
   RioData *data = NULL;
   GKeyFile *modelkeyfile = NULL;
   GError *err = NULL;
-  RidgeModel modelA, modelB;
+  RidgeClass *classes;
+  size_t num_classes;
 
   /* Parse command-line arguments */
   while ((c = getopt (argc, argv, GETOPT_OPTIONS)) != -1) {
@@ -178,23 +311,6 @@ main (int argc, char **argv)
     exit (2);
   }
 
-  /* Check metadata & create classification if necessary */
-  reference = (uint8_t *) rio_data_get_metadata (data,
-                                                 RIO_KEY_IMAGE_CLASSIFICATION,
-                                                 &classification_size);
-  if (reference != NULL
-      && classification_size != (sizeof (uint8_t)
-                                 * rio_data_get_num_entries (data))) {
-    fprintf (stderr ,"ERROR: %s contains invalid classification metadata\n",
-             infile);
-    exit (3);
-  }
-
-  classification_size = sizeof (uint8_t) * rio_data_get_num_entries (data);
-  classification = malloc (classification_size);
-  memset (classification, 0, classification_size);
-
-
   /* Attempt to load model file */
   modelkeyfile = g_key_file_new ();
   if (!g_key_file_load_from_file (modelkeyfile, fitfile,
@@ -205,81 +321,63 @@ main (int argc, char **argv)
   }
 
   /* Populate models */
-  modelA.weight = key_file_get_double (modelkeyfile, "A", "weight");
-  modelA.s_sigma = key_file_get_double (modelkeyfile, "A", "strength.sigma");
-  modelA.s_mu = key_file_get_double (modelkeyfile, "A", "strength.mu");
-  modelA.b_l = key_file_get_double (modelkeyfile, "A", "brightness.l");
-  modelA.b_m = key_file_get_double (modelkeyfile, "A", "brightness.m");
-  modelA.b_mu = key_file_get_double (modelkeyfile, "A", "brightness.mu");
+  classes = key_file_get_classes (modelkeyfile, &num_classes);
+  if (num_classes != 2) {
+    fprintf (stderr, "ERROR: Only two classes currently supported.");
+    exit (4);
+  }
 
-  modelB.weight = key_file_get_double (modelkeyfile, "B", "weight");
-  modelB.s_sigma = key_file_get_double (modelkeyfile, "B", "strength.sigma");
-  modelB.s_mu = key_file_get_double (modelkeyfile, "B", "strength.mu");
-  modelB.b_l = key_file_get_double (modelkeyfile, "B", "brightness.l");
-  modelB.b_m = key_file_get_double (modelkeyfile, "B", "brightness.m");
-  modelB.b_mu = key_file_get_double (modelkeyfile, "B", "brightness.mu");
+  N = rio_data_get_num_entries (data);
+  classification = g_malloc0 (N * sizeof (uint8_t));
+  likelihood = g_malloc0 (N * sizeof(float));
 
   /* Classify */
-  int false_alarms = 0;
-  int misses = 0;
-  int N_A = 0;
-  int N_B = 0;
-
-  for (int i = 0; i < rio_data_get_num_entries (data); i++) {
-    double klass = 0;
+  for (int i = 0; i < N; i++) {
+    double log_ratio = 0;
     RioPoint *p;
     RioSegment *s;
     RioLine *l;
     switch (rio_data_get_type (data)) {
     case RIO_DATA_POINTS:
       p = rio_data_get_point (data, i);
-      klass = (point_log_likelihood (modelB, p)
-               - point_log_likelihood (modelA, p));
+      log_ratio = (ridge_class_point_log_likelihood (classes[1], p)
+               - ridge_class_point_log_likelihood (classes[0], p));
       break;
     case RIO_DATA_SEGMENTS:
       s = rio_data_get_segment (data, i);
-      klass = (segment_log_likelihood (modelB, s)
-               - segment_log_likelihood (modelA, s));
+      log_ratio = (ridge_class_segment_log_likelihood (classes[1], s)
+               - ridge_class_segment_log_likelihood (classes[0], s));
       break;
     case RIO_DATA_LINES:
       l = rio_data_get_line (data, i);
-      klass = (line_log_likelihood (modelB, l)
-               - line_log_likelihood (modelA, l));
+      log_ratio = (ridge_class_line_log_likelihood (classes[1], l)
+               - ridge_class_line_log_likelihood (classes[0], l));
       break;
     default:
-      abort ();
+      g_assert_not_reached ();
     }
 
-    classification[i] = (klass > 0);
-    N_A += classification[i];
-    N_B += !classification[i];
-
-    if (reference != NULL) {
-      misses += (reference[i] && !classification[i]);
-      false_alarms += (!reference[i] && classification[i]);
-    }
+    classification[i] = (log_ratio > 0);
+    likelihood[i] = expf (log_ratio);
   }
 
   /* Save results */
-  if ((reference == NULL) || (infile != outfile)) {
-    rio_data_take_metadata (data, RIO_KEY_IMAGE_CLASSIFICATION,
-                            (char *) classification,
-                            classification_size);
+  rio_data_set_metadata (data, RIO_KEY_IMAGE_CLASSIFICATION,
+                         (char *) classification, N * sizeof (uint8_t));
+  rio_data_set_metadata (data, RIO_KEY_IMAGE_CLASS_LIKELIHOOD,
+                         (char *) likelihood, N * sizeof (float));
 
-    if (!rio_data_to_file (data, outfile)) {
-      const char *msg = errno ? strerror (errno) : "Unexpected error";
-      fprintf (stderr, "ERROR: Could not save ridge data to %s: %s\n",
-               infile, msg);
-      exit (5);
-    }
+  if (!rio_data_to_file (data, outfile)) {
+    const char *msg = errno ? strerror (errno) : "Unexpected error";
+    fprintf (stderr, "ERROR: Could not save ridge data to %s: %s\n",
+             outfile, msg);
+    exit (5);
   }
 
-  printf ("%i classified (A: %i, B: %i)\n", N_A + N_B, N_A, N_B);
-  if (reference) {
-    printf ("%i (%f %%) misses, %i (%f %%) false alarms\n",
-            misses, (double) 100 * misses / (N_A + N_B),
-            false_alarms, (double) 100 * false_alarms / (N_A + N_B));
-  }
-
+  rio_data_destroy (data);
+  g_free (classes);
+  g_free (classification);
+  g_free (likelihood);
+  g_key_file_free (modelkeyfile);
   return 0;
 }
