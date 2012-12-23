@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.63])
-AC_INIT([SSC Geometry-Based Ridge Classifier], [0.1], [p.brett@surrey.ac.uk])
+AC_INIT([SSC Ridge Classifiers], [0.1], [p.brett@surrey.ac.uk])
 
 AC_CONFIG_SRCDIR([ridge-classarea.c])
 AC_CONFIG_AUX_DIR([build-tools])

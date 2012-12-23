@@ -13,4 +13,5 @@ config.status
 configure
 m4
 ridge-classarea
+ridge-classbayes
 stamp-h1
