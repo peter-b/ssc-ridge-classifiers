@@ -1,0 +1,125 @@
+=====================================================
+ Surrey Space Centre ridge classification algorithms
+=====================================================
+
+Copyright (C) 2010-2012 Peter Brett <p.brett@surrey.ac.uk>
+
+Introduction
+============
+
+This package provides some algorithms for classification of
+curvilinear features extracted from SAR images of urban areas, as part
+of research into detection of earthquake damage in urban areas.  It
+was developed at Surrey Space Centre at the University of Surrey in
+Guildford, UK.
+
+For more information, please see:
+
+  P.T.B. Brett and R. Guida. "Bright line detection in COSMO-SkyMed
+  SAR images of urban areas." In Joint Urban Remote Sensing Event 2011
+  (JURSE 2011), pages 253-256, 11-13 April 2011.
+  <http://ieeexplore.ieee.org/xpls/abs_all.jsp?arnumber=5764767&tag=1>
+
+  P.T.B. Brett and R. Guida. "Geometry-based SAR curvilinear feature
+  selection for damage detection. In 9th European Conference on
+  Synthetic Aperture Radar - Invited Papers (EUSAR 2012 - Invited
+  Papers), pages 62-65, 23-26 April 2011.
+  <http://ieeexplore.ieee.org/xpls/abs_all.jsp?arnumber=6216946&tag=1>
+
+Programs
+========
+
+Two programs are provided:
+
+ - The 'ridge-classbayes' tool uses a naive Bayesian classifier with
+   two feature variables: return strength and a saliency measure based
+   on ridge strength.
+
+ - The 'ridge-classarea' tool classifies features using prior
+   probability distributions derived from an idealized urban building
+   model.
+
+Installation
+============
+
+The 'ssc-ridge-classifiers' package requires the 'mmap()' system call
+to support the 'MAP_SHARED' and 'MAP_ANONYMOUS' flags.  Most recent
+versions of Linux provide this.
+
+Dependencies
+------------
+
+In order to compile and install the 'ssc-ridge-classifiers' package,
+you must have the following tools and libraries installed:
+
+ - A C compiler and standard library (GCC/glibc are recommended).
+
+ - The `pkg-config' tool for managing shared libraries.
+   <http://pkgconfig.freedesktop.org/>
+
+ - The 'ssc-ridge-tools' package.
+   <https://github.com/peter-b/ssc-ridge-tools>
+
+ - GTK+ (the Gimp Toolkit), version  2.10.0 or later.
+   <http://www.gtk.org/>
+
+ - GSL (the GNU Scientific Library), version 1.13 or later.
+   <http://wwww.gnu.org/s/gsl/>
+
+ - LibTIFF.
+   <http://www.libtiff.org/>
+
+If you are compiling from the 'ssc-ridge-classifiers' git repository,
+you will also require:
+
+  - The `git' version control tool, version 1.6 or newer.
+    <http://git-scm.com/>
+
+  - GNU Automake, version 1.11.0 or newer.
+    <http://www.gnu.org/software/automake/>
+
+  - GNU Autoconf, version 2.60 or newer.
+    <http://www.gnu.org/software/autoconf/>
+
+  - GNU Libtool.  <http://www.gnu.org/software/libtool/>
+
+Configuration and compilation
+-----------------------------
+
+If you are building from git, clone the repository and set up the
+source tree:
+
+  git clone git://github.com/peter-b/ssc-ridge-classifiers.git
+  cd ssc-ridge-tools
+  ./autogen.sh
+
+Otherwise, extract the source files.
+
+You can then proceed to configure, compile and install the tools in
+the usual manner:
+
+  ./configure
+  make
+  make install
+
+For a full list of the options that can be passed to 'configure',
+please see:
+
+  ./configure --help
+
+License
+=======
+
+Surrey Space Centre ridge classification algorithms (this package) is
+freely distributable under the GNU Public License (GPL) version 3.0 or
+(at your option) any later version.  See the 'COPYING' file for the
+full text of the license.
+
+The programs and associated files are:
+
+  Copyright (C) 2010-2012 Peter Brett <p.brett@surrey.ac.uk>
+
+..
+  Local Variables:
+  mode: text
+  End:
