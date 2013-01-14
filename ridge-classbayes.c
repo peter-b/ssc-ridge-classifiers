@@ -190,7 +190,7 @@ lognormpdf (float x, double mu, double sigma)
 static double
 fisherpdf (float x, double L, double M, double mu)
 {
-  return (2*x)/(mu*mu) * gsl_ran_fdist_pdf (x / mu, 2*L, 2*M);
+  return (2*x)/(mu*mu) * gsl_ran_fdist_pdf ((x*x)/(mu*mu), 2*L, 2*M);
 }
 
 static double
@@ -225,7 +225,7 @@ model_pdf (Model m, double x)
 static double
 ridge_class_log_likelihood (RidgeClass c, RioPoint *p)
 {
-  return (log (model_pdf (c.strength, p->strength))
+  return (log (model_pdf (c.strength, powf(p->strength, 0.25)))
           + log (model_pdf (c.brightness, p->brightness)));
 }
 
@@ -364,6 +364,11 @@ main (int argc, char **argv)
   /* Save results */
   rio_data_set_metadata (data, RIO_KEY_IMAGE_CLASSIFICATION,
                          (char *) classification, N * sizeof (uint8_t));
+
+  /* Swab likelihood values */
+  for (int i = 0; i < N; i++)
+    likelihood[i] = rio_htonf (likelihood[i]);
+
   rio_data_set_metadata (data, RIO_KEY_IMAGE_CLASS_LIKELIHOOD,
                          (char *) likelihood, N * sizeof (float));
 
