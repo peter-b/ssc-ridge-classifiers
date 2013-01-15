@@ -243,13 +243,32 @@ ridge_class_segment_log_likelihood (RidgeClass c, RioSegment *s)
           + ridge_class_log_likelihood (c, rio_segment_get_end (s)));
 }
 
+static int
+double__compare (const void *a, const void *b)
+{
+  double *da = (double *) a;
+  double *db = (double *) b;
+  if (da > db) return 1;
+  if (da < db) return -1;
+  return 0;
+}
+
 static double
 ridge_class_line_log_likelihood (RidgeClass c, RioLine *l)
 {
+  int N = rio_line_get_length (l);
   double sum = c.log_weight;
-  for (int i = 0; i < rio_line_get_length (l); i++) {
-    sum += ridge_class_log_likelihood (c, rio_line_get_point (l, i));
+  double *L = g_new0 (double, N);
+  for (int i = 0; i < N; i++) {
+    L[i] = ridge_class_log_likelihood (c, rio_line_get_point (l, i));
   }
+  /* we sort the values in ascending order to avoid any floating-point
+   * precision issues when summing them. */
+  qsort (L, N, sizeof(double), double__compare);
+  for (int i = 0; i < N; i++) {
+    sum += L[i];
+  }
+  g_free (L);
   return sum;
 }
 
