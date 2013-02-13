@@ -33,18 +33,25 @@
 #include <ridgeutil.h>
 #include <ridgeio.h>
 
-#define GETOPT_OPTIONS "m:t:s:p:j:h"
+#define GETOPT_OPTIONS "M:P:p:t:s:b:g:j:h"
 
 enum {
-  MODE_AREA,
-  MODE_AREA_LENGTH,
+  MODE_MODEL,
+  MODE_LIKELIHOOD,
 };
 
-static double DEFAULT_THRESHOLD = 0.12;
+enum {
+  PRIOR_AREA,
+  PRIOR_AREA_LENGTH,
+};
+
+static double DEFAULT_THRESHOLD = 0;
+static double DEFAULT_WEIGHT = 0.05;
 static double DEFAULT_PARAM_LAMBDA_X = 1.0;
 static double DEFAULT_PARAM_LAMBDA_Y = 1.0;
 static double DEFAULT_PARAM_K = 4;
 static double DEFAULT_PARAM_M = 5;
+static double DEFAULT_PARAM_RHO = 0.1;
 
 typedef struct _SubprocessData SubprocessData;
 
@@ -54,11 +61,14 @@ struct _SubprocessData {
   float *likelihood;
 
   int mode;
+  int prior;
+  double weight;
   double threshold;
   double param_lambda_x;
   double param_lambda_y;
   double param_k;
   double param_m;
+  double param_rho;
 };
 
 void
@@ -69,22 +79,46 @@ usage (const char *name, int status)
 "\n"
 "Classify ridge lines using internal area geometry.\n"
 "\n"
-"  -m MODE         Classification mode (A or AL) [default A]\n"
-"  -t THRESHOLD    Model likelihood threshold [default 0.005]\n"
+"  -M MODE         Classification mode (M or T) [default T]\n"
+"  -P PRIOR        Building size prior (A or AL) [default A]\n"
+"  -p PROB         Prior probability of building [default 0.05]\n"
+"  -t THRESHOLD    Decision rule threshold [default 0]\n"
 "  -s X:Y          Scale factors in ground range/azimuth [default 1]\n"
-"  -p K:M          Building Gamma model parameters [default 4,5]\n"
+"  -b K:M          Building Gamma model parameters [default 4,5]\n"
+"  -g R            Geometric random feature model parameter [default 0.1]\n"
 "  -j THREADS      Number of multiprocessing threads to use [default 1]\n"
 "  -h              Display this message and exit\n"
 "\n"
 "Reads ridge line data generated using 'ridgetool' from IN_FILE, and\n"
-"classifies it using a likelihood threshold classification based on\n"
-"analytical models derived from stereotypical scene geometry.\n"
-"Classification results are written to OUT_FILE, if specified;\n"
-"otherwise, IN_FILE is updated.\n"
+"classifies it using either a likelihood threshold classifier (T) or\n"
+"a model selection classifier (M), using analytical models derived\n"
+"from stereotypical scene geometry.  Classification results are\n"
+"written to OUT_FILE, if specified; otherwise, IN_FILE is updated.\n"
 "\n"
 "Please report bugs to %s.\n",
 name, PACKAGE_BUGREPORT);
   exit (status);
+}
+
+static int
+double__compare (const void *a, const void *b)
+{
+  double *da = (double *) a;
+  double *db = (double *) b;
+  if (da > db) return 1;
+  if (da < db) return -1;
+  return 0;
+}
+
+static double
+sum_double_array (double *d, size_t n)
+{
+  double v = 0;
+  qsort (d, n, sizeof(double), double__compare);
+  for (int i = 0; i < n; i++) {
+    v += d[i];
+  }
+  return v;
 }
 
 /* Calculate total length of line */
@@ -97,6 +131,7 @@ stat_line_length (RioLine *l)
   double len = 0;
   RioPoint *p;
   double x0, x1, y0, y1, dx, dy;
+  double *L = g_new0 (double, M-1);
 
   /* First point */
   p = rio_line_get_point (l, 0);
@@ -110,13 +145,16 @@ stat_line_length (RioLine *l)
     /* Calculate length of segment */
     dx = x1 - x0;
     dy = y1 - y0;
-    len += sqrt (dx * dx + dy * dy);
+    L[i-1] = sqrt (dx * dx + dy * dy);
 
     /* iterate */
     i++;
     x0 = x1;
     y0 = y1;
   }
+
+  len = sum_double_array (L, M-1);
+  g_free (L);
   return len;
 }
 
@@ -156,6 +194,7 @@ stat_line_gyration (RioLine *l)
   xM -= x0; yM -= y0;
 
   double Rg2 = 0;
+  double *L = g_new0 (double, M);
   for (int k = 0; k < M; k++) {
     p = rio_line_get_point (l, k);
     rio_point_get_subpixel (p, &xk, &yk);
@@ -166,8 +205,12 @@ stat_line_gyration (RioLine *l)
     /* Cross product */
     double cp = xk * yM - yk * xM;
 
-    Rg2 += cp * cp;
+    L[k] = cp * cp;
   }
+
+  /* Sum */
+  Rg2 = sum_double_array (L, M);
+  g_free (L);
 
   /* Normalise */
   double Re = stat_line_end_to_end (l);
@@ -219,6 +262,13 @@ prior_building_area_length (RioLine *l, double lambda_x,
     * exp (- L / m / sqrt(Ct));
 }
 
+static double
+prior_geometric (RioLine *l, double rho)
+{
+  int M = rio_line_get_length (l);
+  return rho * pow (1 - rho, M - 1);
+}
+
 static void
 subprocess_func (int threadnum, int threadcount, void *user_data)
 {
@@ -234,17 +284,17 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
        i < (threadnum + 1) * (N / threadcount);
        i++) {
 
-    double p1;
+    double p1, p2, v;
     RioLine *l = rio_data_get_line (lines, i);
-    switch (data->mode) {
-    case MODE_AREA:
+    switch (data->prior) {
+    case PRIOR_AREA:
       p1 = prior_building_area (l,
                                 data->param_lambda_x,
                                 data->param_lambda_y,
                                 data->param_k,
                                 data->param_m);
       break;
-    case MODE_AREA_LENGTH:
+    case PRIOR_AREA_LENGTH:
       p1 = prior_building_area_length (l,
                                        data->param_lambda_x,
                                        data->param_lambda_y,
@@ -255,9 +305,23 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
       g_assert_not_reached ();
     }
 
+    p2 = prior_geometric (l, data->param_rho);
+
     /* Classify */
-    classification[i] = p1 > threshold;
-    likelihood[i] = rio_htonf (p1);
+    switch (data->mode) {
+    case MODE_LIKELIHOOD:
+      v = p1 * data->weight;
+      break;
+    case MODE_MODEL:
+      v = log (data->weight) - log (1 - data->weight)
+        + log (p1) - log (p2);
+      break;
+    default:
+      g_assert_not_reached ();
+    }
+
+    classification[i] = v > threshold;
+    likelihood[i] = rio_htonf (v);
   }
 }
 
@@ -269,22 +333,44 @@ main (int argc, char **argv)
   const char *outfilename = NULL;
   RioData *lines = NULL;
   SubprocessData data;
-  data.mode = MODE_AREA;
+  data.prior = PRIOR_AREA;
+  data.mode = MODE_LIKELIHOOD;
+  data.weight = DEFAULT_WEIGHT;
   data.threshold = DEFAULT_THRESHOLD;
   data.param_k = DEFAULT_PARAM_K;
   data.param_m = DEFAULT_PARAM_M;
   data.param_lambda_x = DEFAULT_PARAM_LAMBDA_X;
   data.param_lambda_y = DEFAULT_PARAM_LAMBDA_Y;
+  data.param_rho = DEFAULT_PARAM_RHO;
 
   while ((c = getopt (argc, argv, GETOPT_OPTIONS)) != -1) {
     switch (c) {
-    case 'm':
-      if (strcmp(optarg, "A") == 0) {
-        data.mode = MODE_AREA;
-      } else if (strcmp(optarg, "AL") == 0) {
-        data.mode = MODE_AREA_LENGTH;
+    case 'M':
+      if (strcmp (optarg, "M") == 0) {
+        data.mode = MODE_MODEL;
+      } else if (strcmp (optarg, "AL") == 0) {
+        data.mode = MODE_LIKELIHOOD;
       } else {
-        fprintf (stderr, "ERROR: Bad argument '%s' to -m option.\n\n",
+        fprintf (stderr, "ERROR: Bad argument '%s' to -M option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
+    case 'P':
+      if (strcmp(optarg, "A") == 0) {
+        data.prior = PRIOR_AREA;
+      } else if (strcmp(optarg, "AL") == 0) {
+        data.prior = PRIOR_AREA_LENGTH;
+      } else {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -P option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
+    case 'p':
+      status = sscanf (optarg, "%lf", &data.weight);
+      if (status != 1) {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -p option.\n\n",
                  optarg);
         usage (argv[0], 1);
       }
@@ -306,11 +392,19 @@ main (int argc, char **argv)
         usage (argv[0], 1);
       }
       break;
-    case 'p':
+    case 'b':
       status = sscanf (optarg, "%lf:%lf",
                        &data.param_k, &data.param_m);
       if (status != 2) {
         fprintf (stderr, "ERROR: Bad argument '%s' to -p option.\n\n",
+                 optarg);
+        usage (argv[0], 1);
+      }
+      break;
+    case 'g':
+      status = sscanf (optarg, "%lf", &data.param_rho);
+      if (status != 1) {
+        fprintf (stderr, "ERROR: Bad argument '%s' to -g option.\n\n",
                  optarg);
         usage (argv[0], 1);
       }
@@ -341,14 +435,6 @@ main (int argc, char **argv)
     }
   }
 
-  /* Warn if input doesn't make sense */
-  if (data.mode == MODE_AREA_LENGTH
-      && data.param_lambda_x != data.param_lambda_y) {
-    fprintf (stderr,
-"WARNING: In AL (area/length) mode, results may be unreliable without\n"
-"equal ground range and azimuth scale factors.\n\n");
-  }
-
   /* Get input filename */
   if (argc - optind < 1) {
     fprintf (stderr, "ERROR: You must specify an input filename.\n\n");
@@ -361,6 +447,20 @@ main (int argc, char **argv)
     outfilename = argv[optind++];
   } else {
     outfilename = infilename;
+  }
+
+  /* Warn if input doesn't make sense */
+  if (data.prior == PRIOR_AREA_LENGTH
+      && data.param_lambda_x != data.param_lambda_y) {
+    fprintf (stderr,
+"WARNING: When using the AL (area/length) prior, results may be \n"
+"unreliable without equal ground range and azimuth scale factors.\n\n");
+  }
+  if (data.mode == MODE_LIKELIHOOD
+      && data.threshold <= 0) {
+    fprintf (stderr,
+"WARNING: When using L (likelihood) mode, the threshold value should\n"
+"normally be greater than 0.\n\n");
   }
 
   /* Load ridge data */
