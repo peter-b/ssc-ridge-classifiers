@@ -310,7 +310,7 @@ subprocess_func (int threadnum, int threadcount, void *user_data)
     /* Classify */
     switch (data->mode) {
     case MODE_LIKELIHOOD:
-      v = p1 * data->weight;
+      v = log(p1);
       break;
     case MODE_MODEL:
       v = log (data->weight) - log (1 - data->weight)
@@ -348,7 +348,7 @@ main (int argc, char **argv)
     case 'M':
       if (strcmp (optarg, "M") == 0) {
         data.mode = MODE_MODEL;
-      } else if (strcmp (optarg, "AL") == 0) {
+      } else if (strcmp (optarg, "T") == 0) {
         data.mode = MODE_LIKELIHOOD;
       } else {
         fprintf (stderr, "ERROR: Bad argument '%s' to -M option.\n\n",
