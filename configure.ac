@@ -24,5 +24,8 @@ PKG_CHECK_MODULES([RIDGETOOL], [libridgetool], [],
 PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.16], [],
   AC_MSG_ERROR([GLib 2.16.0 or later is required.]))
 
+AC_CHECK_LIB([m], [sqrt])
+AC_CHECK_LIB([tiff], [TIFFOpen])
+
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
