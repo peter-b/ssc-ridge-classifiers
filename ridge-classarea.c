@@ -1,6 +1,6 @@
 /*
  * Surrey Space Centre ridge tools for SAR data processing
- * Copyright (C) 2012  Peter Brett <p.brett@surrey.ac.uk>
+ * Copyright (C) 2012-2013  Peter Brett <p.brett@surrey.ac.uk>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -229,7 +229,7 @@ prior_building_area (RioLine *l,
   /* Estimate of projected area */
   double t = Re * sqrt (3 * Rg2);
   double Ct = lambda_x * lambda_y;
-  double tmp = t / Ct / (m*m);
+  double tmp = t / (Ct*m*m);
   double p;
 
   /* Cope with Re = 0 case */
