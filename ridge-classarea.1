@@ -1,0 +1,100 @@
+.TH ridge-classarea 1 "April 23, 2013" "Surrey Space Centre" 1.0
+.SH NAME
+ridge-classarea - Classify ridges using shape
+.SH SYNOPSIS
+.B ridge-classarea
+[\fIOPTION\fR ...] \fIRDG_FILE\fR [\fIOUT_FILE\fR]
+.SH DESCRIPTION
+.PP
+\fBridge-classarea\fR is a tool for classifying ridge line data
+extracted using \fBridgetool\fR(1)'s `\fB-l\fR' mode.  It is
+specifically designed for identifying curvilinear features extracted
+from very high resolution Synthetic Aperture Radar (SAR) amplitude
+images.  It performs a binary classification to distinguish features
+that may be associated with urban structures' double reflection lines
+from other features (e.g. features occurring due to noise).  A more
+detailed description of the models may be found in [BRETT2012].
+.SH OPTIONS
+.TP 8
+\fB-P\fR \fIPRIOR\fR
+\fBridge-classarea\fR offers two possible prior models for
+building-related features.  If the \fIPRIOR\fR is set to \fBA\fR, a
+model based on the area contained by each feature is used.
+Alternatively, \fIPRIOR\fR may be set to \fBAL\fR, which selects a
+model which uses both the area and the length of each feature.  Note
+that the \fBAL\fR model should only be used if both the azimuth and
+ground range scale factors are equal.
+.TP 8
+\fB-M\fR \fIMODE\fR
+The tool has two possible modes of operation.  If the mode is \fBT\fR,
+classification is carried out using a threshold on the posterior
+likelihood of the selected prior building model.  If the mode is
+\fBM\fR, classification is carried out using a model selection
+approach, with non-building features modelled by a geometric p.d.f.
+.TP 8
+\fB-p\fR \fIPROB\fR
+Set the prior probability of any feature in the population being
+associated with a building.  This is only used in model selection
+mode.
+.TP 8
+\fB-g\fR \fIRHO\fR
+Set the geometric p.d.f. parameter for modelling the length of
+non-building features.  The value of \fIRHO\fR is dependent on the
+scale parameter used when extracting ridges using \fBridgetool\fR(1),
+and on whether multilook processing was carried out on the original
+SAR image.  This is only used in model selection mode.
+.TP 8
+\fB-t\fR \fITHRESHOLD\fR
+Set the classification threshold.  In likelihood threshold mode, this
+is compared directly with the posterior log likelihood of the building
+model.  In model selection mode, this is used to bias the log
+likelihood ratio of building model to the non-building model,
+including the relative prior probabilities of the two models.
+.TP 8
+\fB-s\fR \fIX\fR:\fIY\fR
+Set the scale factors of the original SAR image in ground range
+(\fIX\fR) and azimuth (\fIY\fR).  These values are expressed in pixels
+per metre.  They should be equal if the \fBAL\fR model is to be used.
+.TP 8
+\fB-b\fR \fIK\fR:\fIM\fR
+Set the parameters of the Gamma model used to model building wall
+length in metres.  It is assumed by both models that buildings length
+and width are i.i.d.
+.TP 8
+\fB-j\fR \fITHREADS\fR
+Set the number of parallel threads to use.  Usually, set this to the
+number of available processors.  By default, only a single thread is
+used.
+.TP 8
+\fB-h\fR
+Print a help message.
+.SH EXAMPLE
+.PP
+Classify curvilinear features extracted at scale 8 from an image with
+0.85 m ground range and azimuth resolution, using the likelihood
+threshold classifier and a empirically-chosen classification
+threshold, and assuming that buildings have mean wall length of 32 m:
+.PP
+.RS
+ridge-classbayes -MM -PA -s'1.18:1.18' -b'4:8' -t-12.85 features.rdg
+.RE
+.SH REFERENCES
+.TP 8
+[BRETT2012]
+Brett, Peter T.B.; Guida, Raffaella, \fIGeometry-based SAR curvilinear
+feature selection for damage detection\fR, Synthetic Aperture Radar,
+2012. EUSAR. 9th European Conference on, pp.62,65, 23-26
+April 2012
+.SH AUTHOR
+Written by Peter TB Brett, Surrey Space Centre, University of Surrey,
+UK.
+.SH COPYRIGHT
+.PP
+Copyright \(co 2010-2013 Peter TB Brett <p.brett@surrey.ac.uk>.
+License GPLv3+: GNU GPL version 3 or later
+<http://gnu.org/licenses/gpl.html>.
+.PP
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+.SH SEE ALSO
+\fBridgetool\fR(1), \fBridge-classbayes\fR(1).

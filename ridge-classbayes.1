@@ -1,0 +1,110 @@
+.TH ridge-classbayes 1 "April 23, 2013" "Surrey Space Centre" 1.0
+.SH NAME
+ridge-classbayes - Classify ridges using brightness & strength
+.SH SYNOPSIS
+.B ridge-classbayes
+\fIFIT\fR \fIRDG_FILE\fR [\fIOUT_FILE\fR]
+.SH DESCRIPTION
+.PP
+\fBridge-classbayes\fR is a tool for classifying ridge data extracted
+using \fBridgetool\fR(1).  It carries out a binary classification of
+point, segment, or line data based on the image brightness and ridge
+strength at each ridge point.
+.PP
+The brightness and ridge strength are assumed to be independent, and
+are each modelled by either a log normal p.d.f. or a G^0_A p.d.f.
+These priors are used as the basis for a naive Bayesian classifier.
+More details of this classification scheme can be found in
+[BRETT2011].
+.PP
+The model parameters for each class are read from a \fIFIT\fR file,
+and ridge data is read from \fIRDG_FILE\fR.  Classified data is
+written to \fIOUT_FILE\fR, if specified, or otherwise it is written
+back to \fIRDG_FILE\fR.
+.SH FIT FILE FORMAT
+.PP
+The format of the \fIFIT\fR parameter file is a key-value file, with
+one section per class.  The basic format is:
+.PP
+.nf
+.RS
+[section]
+key=value
+.RE
+.fe
+.PP
+Each class must have a \fBweight\fR key associated with it, with a
+value in the range 0-1.  This is interpreted as the prior likelihood
+of that class as a whole.  It must also provide model definitions for
+each of the brightness and strength feature variables.
+.PP
+Each model definition must specify a model type, using a key called
+`\fI<var>\fR.type', where \fI<var>\fR is either `brightness' or
+`strength'.  It must also provide appropriate model parameters.  There
+are three model types supported by the tool:
+.TP 8
+\fBLogN\fR
+This is a log normal model.  It takes two parameters: \fBsigma\fR and
+\fBmu\fR.
+.TP 8
+\fBGA0\fR
+This is a G^0_A model, as proposed in [FRERY1997].  It takes three
+parameters: \fBalpha\fR, \fBgamma\fR and \fBn\fR.
+.TP 8
+\fBFA\fR
+This is an alternative parameterisation of the G^A_0 model, equivalent
+to a modified Fisher distribution (with parameters \fBL\fR and
+\fBM\fR), combined with an additional scale parameter \fBmu\fR.
+.SH FIT FILE EXAMPLE
+This is a full example of a \fIFIT\fR file, using the FA model for all
+classes and feature variables.
+.PP
+.nf
+.RS
+[1]
+weight=0.966511
+brightness.type=FA
+brightness.L=1.70789
+brightness.M=1.17002
+brightness.mu=110.53
+strength.type=FA
+strength.L=0.952623
+strength.M=0.8407
+strength.mu=14.3266
+[2]
+weight=0.0334889
+brightness.type=FA
+brightness.L=1.10185
+brightness.M=1.21776
+brightness.mu=245.556
+strength.type=FA
+strength.L=0.939295
+strength.M=2.03909
+strength.mu=61.8717
+.RE
+.fe
+.SH REFERENCES
+.TP 8
+[BRETT2011]
+Brett, P.T.B.; Guida, R., \fIBright line detection in COSMO-SkyMed SAR
+images of urban areas\fR, Urban Remote Sensing Event (JURSE), 2011
+Joint, pp.253,256, 11-13 April 2011 <doi:10.1109/JURSE.2011.5764767>
+.TP 8
+[FRERY1997]
+Frery, A.C.; Muller, H.-J.; Yanasse, C.C.F.; Sant'Anna, S.J.S., \fIA
+model for extremely heterogeneous clutter\fR, Geoscience and Remote
+Sensing, IEEE Transactions on, vol.35, no.3, pp.648,659, May 1997
+<doi:10.1109/36.581981>
+.SH AUTHOR
+Written by Peter TB Brett, Surrey Space Centre, University of Surrey,
+UK.
+.SH COPYRIGHT
+.PP
+Copyright \(co 2010-2013 Peter TB Brett <p.brett@surrey.ac.uk>.
+License GPLv3+: GNU GPL version 3 or later
+<http://gnu.org/licenses/gpl.html>.
+.PP
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+.SH SEE ALSO
+\fBridgetool\fR(1), \fBridge-classarea\fR(1).
