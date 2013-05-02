@@ -14,6 +14,9 @@ images.  It performs a binary classification to distinguish features
 that may be associated with urban structures' double reflection lines
 from other features (e.g. features occurring due to noise).  A more
 detailed description of the models may be found in [BRETT2012].
+.PP
+Classified data is written to \fIOUT_FILE\fR, if specified, or
+otherwise it is written back to \fIRDG_FILE\fR.
 .SH OPTIONS
 .TP 8
 \fB-P\fR \fIPRIOR\fR
@@ -26,10 +29,10 @@ that the \fBAL\fR model should only be used if both the azimuth and
 ground range scale factors are equal.
 .TP 8
 \fB-M\fR \fIMODE\fR
-The tool has two possible modes of operation.  If the mode is \fBT\fR,
-classification is carried out using a threshold on the posterior
-likelihood of the selected prior building model.  If the mode is
-\fBM\fR, classification is carried out using a model selection
+The tool has two possible modes of operation.  If the \fIMODE\fR is
+\fBT\fR, classification is carried out using a threshold on the
+posterior likelihood of the selected prior building model.  If the
+mode is \fBM\fR, classification is carried out using a model selection
 approach, with non-building features modelled by a geometric p.d.f.
 .TP 8
 \fB-p\fR \fIPROB\fR
@@ -58,8 +61,8 @@ per metre.  They should be equal if the \fBAL\fR model is to be used.
 .TP 8
 \fB-b\fR \fIK\fR:\fIM\fR
 Set the parameters of the Gamma model used to model building wall
-length in metres.  It is assumed by both models that buildings length
-and width are i.i.d.
+length, in units of metres.  It is assumed by both models that
+buildings length and width are i.i.d.
 .TP 8
 \fB-j\fR \fITHREADS\fR
 Set the number of parallel threads to use.  Usually, set this to the
